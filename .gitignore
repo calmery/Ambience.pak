@@ -1,0 +1,18 @@
+# Build artifacts
+*.o
+/ambience
+bin/tg5040/ambience
+bin/tg5050/ambience
+/dist/
+
+# Runtime
+ambience.cfg
+log.txt
+
+# User-provided audio (bring your own; keep the folder via .gitkeep)
+res/sounds/*
+!res/sounds/.gitkeep
+
+# macOS / editor / local agent state
+.DS_Store
+.claude/
