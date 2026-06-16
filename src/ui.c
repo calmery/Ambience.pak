@@ -366,9 +366,10 @@ void ui_render(SDL_Renderer *ren, App *a)
     render_tabs(ren, a);
 
     if (a->nch == 0) {
+        char hint[700];
+        snprintf(hint, sizeof hint, "Put .ogg / .wav / .mp3 files in %s", sys_sounds_dir());
         text(ren, g_font_l, "No sounds found", UI_W / 2, UI_H / 2 - 50, C_WHITE, 1);
-        text(ren, g_font_m, "Put .ogg, .wav or .mp3 files in res/sounds",
-             UI_W / 2, UI_H / 2 + 6, C_GRAY, 1);
+        text(ren, g_font_m, hint, UI_W / 2, UI_H / 2 + 6, C_GRAY, 1);
         draw_hint(ren, 40, HINT_Y, "B", "EXIT");
         return;
     }

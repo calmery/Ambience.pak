@@ -5,22 +5,26 @@ Turn the device into a bedside sound machine: layer your own looping sounds —
 rain, ocean, fire, anything — each with its own volume, and fade out on a timer.
 
 ## Sounds (bring your own)
-Drop audio files into **`res/sounds/`** inside the pak. Each file becomes a
-channel named after the file:
+On the device, drop audio files into **`/mnt/SDCARD/Ambience/sounds/`**. This
+folder lives outside the pak, so your sounds and presets **survive uninstalling
+or updating the app**. The folder is created on first launch, and the bundled
+sample (`Ocean.mp3`) is copied in so there's something to play right away.
+Each file becomes a channel named after the file:
 
 - `Fire.ogg` → a **Fire** channel, `Ocean.mp3` → **Ocean**, etc.
 - Supported formats: **OGG, WAV, MP3** (any sample rate / mono or stereo — they
   are resampled to 44.1 kHz stereo on load).
 - Files loop seamlessly; for best results use steady, loop-friendly recordings.
-- No files yet? The app shows a hint and waits — add some and relaunch.
+- No files yet? The app shows the folder path and waits — add some and relaunch.
 
-There are no built-in sounds.
+(During desktop development the app reads the local `res/sounds/` instead.)
 
 ## Look & saving
 The UI follows the NextUI style — rounded pills, the Rounded M+ font, the
-Primary Accent Color (read from NextUI's settings) for the volume bars, and a
-button-hint bar. The current mix (each channel's volume + mute state) is written
-to `ambience.cfg` next to the binary and restored automatically on the next launch.
+Primary Accent Color (read from NextUI's settings), a button-hint bar, and a
+header showing the device master volume + battery. Presets (each channel's
+volume + mute state, the active preset, and free-form names) are written to
+`/mnt/SDCARD/Ambience/ambience.cfg` and restored automatically on the next launch.
 
 ## Controls
 
@@ -55,19 +59,22 @@ make selftest    # headless: scan res/sounds and report the channels found
 `res/` (font + sounds), and `bin/`.
 
 Install: copy the resulting folder to `/Tools/<platform>/Ambience.pak` on the SD
-card. Add or replace audio in `Ambience.pak/res/sounds/` any time.
+card. Add or replace audio in `/mnt/SDCARD/Ambience/sounds/` any time — it is
+kept outside the pak, so reinstalling or removing the app won't touch it.
 
 ## Layout (source modules)
 - `src/app.h` — shared `Channel` / `App` types + constants
-- `src/system.{c,h}` — NextUI integration: accent colour, battery
+- `src/system.{c,h}` — NextUI integration: accent colour, battery, master
+  volume, and persistent data paths
 - `src/audio.{c,h}` — decode (ogg/wav/mp3), resample, load folder, mix, device
-- `src/ui.{c,h}` — rendering: fonts, primitives, scroll arrows, screens
-- `src/config.{c,h}` — save/load the mix (future home of presets)
+- `src/ui.{c,h}` — rendering: fonts, primitives, scroll arrows, screens, tabs
+- `src/keyboard.{c,h}` — standalone on-screen keyboard (reusable across apps)
+- `src/config.{c,h}` — save/load presets
 - `src/actions.{c,h}` — user actions on the app state
 - `src/main.c` — startup, main loop, input mapping, `--selftest` / `--shot`
 - `src/stb_vorbis.c`, `src/dr_mp3.c` — bundled OGG / MP3 decoders (static)
 - `res/font.ttf` — Rounded M+ 1c Bold (the NextUI rounded font), bundled
-- `res/sounds/` — your audio files
+- `res/sounds/` — bundled sample(s), seeded to the SD card on first run
 - `launch.sh`, `pak.json`, `build-pak.sh` — NextUI pak packaging / build
 
 Dev helpers: `./ambience --selftest` (scan + decode, no audio device) and
@@ -80,4 +87,4 @@ Bundled third-party assets/libraries, all redistributable:
 - **stb_vorbis** (OGG decoder) — Sean Barrett, public domain / MIT.
 - **dr_mp3** (MP3 decoder) — David Reid, public domain (MIT-0).
 
-Audio files are **not** included — add your own to `res/sounds/`.
+Beyond the bundled sample, add your own audio to `/mnt/SDCARD/Ambience/sounds/`.

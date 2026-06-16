@@ -1,9 +1,8 @@
 #include "config.h"
 #include "audio.h"       /* g_dev: lock around channel writes */
+#include "system.h"      /* sys_config_path: persistent config location */
 #include <stdio.h>
 #include <string.h>
-
-#define CONFIG_PATH "ambience.cfg"
 
 static void clampf(float *v) { if (*v < 0) *v = 0; if (*v > 1) *v = 1; }
 
@@ -15,7 +14,7 @@ void config_load(App *a)
     a->active = 0;
     int cur = -1;
 
-    FILE *f = fopen(CONFIG_PATH, "r");
+    FILE *f = fopen(sys_config_path(), "r");
     if (f) {
         char line[160];
         while (fgets(line, sizeof line, f)) {
@@ -99,7 +98,7 @@ void config_capture_active(App *a)
 void config_save(App *a)
 {
     config_capture_active(a);
-    FILE *f = fopen(CONFIG_PATH, "w");
+    FILE *f = fopen(sys_config_path(), "w");
     if (!f) return;
     fprintf(f, "active %d\n", a->active);
     for (int i = 0; i < a->npreset; i++) {

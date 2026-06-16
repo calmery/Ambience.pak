@@ -1,9 +1,10 @@
 /*
  * Ambience - an ambient-sound mixer for NextUI handhelds.
  *
- * Drop audio files (.ogg / .wav / .mp3) into res/sounds/; each becomes a
- * looping channel with its own volume and mute. The mix is saved to
- * ambience.cfg and restored on launch. See app.h for the module layout.
+ * Drop audio files (.ogg / .wav / .mp3) into <SDCARD>/Ambience/sounds/; each
+ * becomes a looping channel with its own volume and mute. Presets are saved to
+ * <SDCARD>/Ambience/ambience.cfg. Both live outside the pak so they survive an
+ * uninstall (see system.c for path resolution). See app.h for the module layout.
  *
  * Controls (keyboard / TrimUI):
  *   Up / Down       D-Pad U/D    select channel
@@ -25,8 +26,6 @@
 #include "config.h"
 #include "actions.h"
 
-#define SOUNDS_DIR "res/sounds"
-
 static App g_app;
 
 static void app_seed(App *a)
@@ -42,7 +41,7 @@ static void app_seed(App *a)
 static int run_selftest(void)
 {
     app_seed(&g_app);
-    audio_load_sounds(&g_app, SOUNDS_DIR);
+    audio_load_sounds(&g_app, sys_sounds_dir());
     printf("selftest: channels=%d\n", g_app.nch);
     for (int c = 0; c < g_app.nch; c++)
         printf("  %-16s %d frames (%.1fs)\n", g_app.ch[c].name,
@@ -228,13 +227,14 @@ int main(int argc, char **argv)
     sys_load_accent();
     SDL_Log("accent = #%02x%02x%02x", g_accent.r, g_accent.g, g_accent.b);
     app_seed(&g_app);
-    audio_load_sounds(&g_app, SOUNDS_DIR);
+    audio_load_sounds(&g_app, sys_sounds_dir());
     config_load(&g_app);
     config_apply_active(&g_app);
     if (audio_open(&g_app) != 0)
         SDL_Log("continuing without audio");   /* UI still works */
 
     int running = 1, confirm = 0;
+    int screen_off = 0;                         /* sleep timer turned the screen off */
     int held = -1;                              /* held direction action */
     Uint32 held_since = 0, held_last = 0;
     const Uint32 HOLD_DELAY = 350, HOLD_RATE = 70;
@@ -243,6 +243,12 @@ int main(int argc, char **argv)
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { running = 0; continue; }
+            if (screen_off) {                   /* any press just wakes the screen */
+                if (e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN) {
+                    sys_backlight(1); screen_off = 0; held = -1;
+                }
+                continue;
+            }
             if (confirm) {
                 if (confirm_event(&e, &running)) confirm = 0;
                 continue;
@@ -271,17 +277,24 @@ int main(int argc, char **argv)
             SDL_LockAudioDevice(g_dev);
             g_app.sleep_left -= dt;
             if (g_app.sleep_left <= 20.0f) g_app.fade_target = 0.0f;
-            if (g_app.sleep_left <= 0.0f) { g_app.sleep_left = -1; g_app.paused = 1; }
+            int expired = (g_app.sleep_left <= 0.0f);
+            if (expired) { g_app.sleep_left = -1; g_app.paused = 1; }
             SDL_UnlockAudioDevice(g_dev);
+            if (expired) { sys_backlight(0); screen_off = 1; }   /* lights out */
         }
 
         if (g_app.dirty && now - g_app.last_change > 800) config_save(&g_app);
 
+        if (screen_off) {                       /* asleep: idle, nothing to draw */
+            SDL_Delay(50);
+            continue;
+        }
         ui_render(ren, &g_app);
         if (confirm) ui_render_confirm(ren);
         SDL_RenderPresent(ren);
     }
 
+    if (screen_off) sys_backlight(1);           /* don't leave it dark on exit */
     if (g_app.dirty) config_save(&g_app);
     audio_close();
     audio_free_sounds(&g_app);
