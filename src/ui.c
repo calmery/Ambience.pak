@@ -1,6 +1,8 @@
 #include "ui.h"
 #include "system.h"      /* g_accent, sys_battery */
+#include "keyboard.h"    /* osk_run / osk_demo (portable keyboard module) */
 #include <SDL2/SDL_ttf.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +21,14 @@ static const SDL_Color C_MUTE  = { 92,  96, 106, 255};
 static TTF_Font *g_font_l, *g_font_m, *g_font_s;
 static SDL_Texture *g_arrow_up, *g_arrow_down;
 static int g_arrow_w, g_arrow_h;
+
+/* main-screen vertical layout (kept together so the pieces stay in sync) */
+#define TAB_Y        108            /* preset tab strip top (below sleep line) */
+#define TAB_H         48            /* tab height                              */
+#define LIST_TOP     246            /* first channel row top                   */
+#define ROW_H         56            /* channel selection-pill height           */
+#define ROW_PITCH     80            /* channel row spacing                     */
+#define HINT_Y    (UI_H - 56)       /* bottom hint bar                         */
 
 /* ---- text label helpers -------------------------------------------- */
 
@@ -267,13 +277,26 @@ static void render_header(SDL_Renderer *ren, App *a)
     int clockW = text_w(g_font_m, buf);
     text(ren, g_font_m, buf, UI_W - 40, 30, C_GRAY, 2);
 
+    int rightX = UI_W - 40 - clockW - 20;        /* next slot, right-anchored */
+
     int bpct, bchg;
     sys_battery(&bpct, &bchg);
     if (bpct >= 0) {
         char bb[16];
         snprintf(bb, sizeof bb, "%d%%%s", bpct, bchg ? "+" : "");
-        text(ren, g_font_m, bb, UI_W - 40 - clockW - 20, 30,
-             bchg ? g_accent : C_GRAY, 2);
+        SDL_Color bc = bpct <= 10 ? (SDL_Color){235, 70, 70, 255}    /* critical: red    */
+                     : bpct <= 20 ? (SDL_Color){240, 160, 40, 255}   /* low: orange      */
+                     : bchg       ? g_accent                         /* charging         */
+                                  : C_GRAY;
+        text(ren, g_font_m, bb, rightX, 30, bc, 2);
+        rightX -= text_w(g_font_m, bb) + 20;
+    }
+
+    int vol = sys_volume();
+    if (vol >= 0) {
+        char vb[16];
+        snprintf(vb, sizeof vb, "VOL %d%%", vol);
+        text(ren, g_font_m, vb, rightX, 30, C_GRAY, 2);
     }
     if (a->paused)
         text(ren, g_font_m, "PAUSED", UI_W / 2, 30, g_accent, 1);
@@ -284,21 +307,73 @@ static void render_header(SDL_Renderer *ren, App *a)
     }
 }
 
+static void render_tabs(SDL_Renderer *ren, App *a)
+{
+    const int ty = TAB_Y, h = TAB_H, margin = 32, gap = 8;
+    const int view_w = UI_W - 2 * margin;     /* visible tab strip width */
+
+    /* measure each tab and its content-space x (relative to the left margin) */
+    char lbl[MAXPRESET][20];
+    int w[MAXPRESET], xs[MAXPRESET], total = 0;
+    for (int i = 0; i < a->npreset; i++) {
+        ui_make_disp(a->presets[i].name, lbl[i], sizeof lbl[i]);
+        w[i] = text_w(g_font_m, lbl[i]) + 28;
+        xs[i] = total;
+        total += w[i] + gap;
+    }
+    if (a->npreset > 0) total -= gap;
+
+    /* target scroll: keep the active tab fully in view */
+    static float scroll = 0; static Uint32 last = 0;
+    float target = scroll;
+    if (total > view_w) {
+        int ax = xs[a->active], aw = w[a->active];
+        if (ax - target < 0) target = ax;                              /* off the left  */
+        else if (ax + aw - target > view_w) target = ax + aw - view_w; /* off the right */
+        float maxs = (float)(total - view_w);
+        if (target < 0) target = 0;
+        if (target > maxs) target = maxs;
+    } else target = 0;
+
+    /* time-based easing toward the target offset (snap on the first frame) */
+    Uint32 now = SDL_GetTicks();
+    if (!last) { scroll = target; last = now; }
+    else {
+        float dt = (now - last) / 1000.0f; last = now;
+        if (dt > 0.1f) dt = 0.1f;
+        scroll += (target - scroll) * (1.0f - expf(-dt * 14.0f));
+        if (fabsf(target - scroll) < 0.5f) scroll = target;
+    }
+
+    SDL_Rect clip = { 0, ty, UI_W, h };       /* keep tabs on their own row */
+    SDL_RenderSetClipRect(ren, &clip);
+    int tyt = ty + h / 2 - TTF_FontHeight(g_font_m) / 2;
+    for (int i = 0; i < a->npreset; i++) {
+        int tx = margin + xs[i] - (int)(scroll + 0.5f);
+        if (tx + w[i] < 0 || tx > UI_W) continue;   /* fully scrolled out */
+        int act = (i == a->active);
+        fill_round(ren, tx, ty, w[i], h, h / 2, act ? g_accent : C_CHIP);
+        text(ren, g_font_m, lbl[i], tx + w[i] / 2, tyt, act ? C_WHITE : C_GRAY, 1);
+    }
+    SDL_RenderSetClipRect(ren, NULL);
+}
+
 void ui_render(SDL_Renderer *ren, App *a)
 {
     set_color(ren, C_BG);
     SDL_RenderClear(ren);
     render_header(ren, a);
+    render_tabs(ren, a);
 
     if (a->nch == 0) {
         text(ren, g_font_l, "No sounds found", UI_W / 2, UI_H / 2 - 50, C_WHITE, 1);
         text(ren, g_font_m, "Put .ogg, .wav or .mp3 files in res/sounds",
              UI_W / 2, UI_H / 2 + 6, C_GRAY, 1);
-        draw_hint(ren, 40, UI_H - 56, "B", "EXIT");
+        draw_hint(ren, 40, HINT_Y, "B", "EXIT");
         return;
     }
 
-    const int PH = 52, pitch = 64, top = 116;
+    const int PH = ROW_H, pitch = ROW_PITCH, top = LIST_TOP;   /* 5 rows; roomy arrow gaps */
     const int px = 32, pw = UI_W - 64;
     const int lh = TTF_FontHeight(g_font_l);
     const int mh = TTF_FontHeight(g_font_m);
@@ -351,26 +426,31 @@ void ui_render(SDL_Renderer *ren, App *a)
         text(ren, g_font_m, buf, pctR, midy - mh / 2, c->muted ? C_MUTE : C_GRAY, 2);
     }
 
-    /* scroll indicators (texture; fallback to a flat triangle) */
+    /* scroll indicators: tucked close to the list (not mid-gap) so they read as
+     * part of it, while still clearing the tabs above and hint bar below */
+    const int list_bottom = top + (vis - 1) * pitch + PH;
+    const int arrow_gap = 18;                     /* distance from the list edge */
     if (a->scroll > 0) {
+        int ay = top - arrow_gap - g_arrow_h;
         if (g_arrow_up)
             SDL_RenderCopy(ren, g_arrow_up, NULL,
-                &(SDL_Rect){UI_W / 2 - g_arrow_w / 2, top - 24, g_arrow_w, g_arrow_h});
-        else tri(ren, UI_W / 2, top - 20, 24, 12, 1, C_GRAY);
+                &(SDL_Rect){UI_W / 2 - g_arrow_w / 2, ay, g_arrow_w, g_arrow_h});
+        else tri(ren, UI_W / 2, ay, 24, 12, 1, C_GRAY);
     }
     if (last < a->nch) {
-        int yy = top + vis * pitch + 8;
+        int ay = list_bottom + arrow_gap;
         if (g_arrow_down)
             SDL_RenderCopy(ren, g_arrow_down, NULL,
-                &(SDL_Rect){UI_W / 2 - g_arrow_w / 2, yy, g_arrow_w, g_arrow_h});
-        else tri(ren, UI_W / 2, yy, 24, 12, 0, C_GRAY);
+                &(SDL_Rect){UI_W / 2 - g_arrow_w / 2, ay, g_arrow_w, g_arrow_h});
+        else tri(ren, UI_W / 2, ay, 24, 12, 0, C_GRAY);
     }
 
-    int hx = 40, hy = UI_H - 56;
+    int hx = 40, hy = HINT_Y;
     hx = draw_hint(ren, hx, hy, "D-PAD", "ADJUST");
     hx = draw_hint(ren, hx, hy, "A", "MUTE");
+    hx = draw_hint(ren, hx, hy, "L R", "PRESET");
+    hx = draw_hint(ren, hx, hy, "Y", "MENU");
     hx = draw_hint(ren, hx, hy, "X", "PAUSE");
-    hx = draw_hint(ren, hx, hy, "SEL", "SLEEP");
     hx = draw_hint(ren, hx, hy, "B", "EXIT");
     (void)hx;
 }
@@ -392,4 +472,83 @@ void ui_render_confirm(SDL_Renderer *ren)
     int hy = y + h - 72;
     hx = draw_hint(ren, hx, hy, "A", "QUIT");
     draw_hint(ren, hx, hy, "B", "CANCEL");
+}
+
+/* ---- modal: preset menu -------------------------------------------- */
+
+int ui_preset_menu(SDL_Renderer *ren, App *a)
+{
+    const char *items[] = {"New preset", "Rename preset", "Delete preset"};
+    int nit = (a->npreset > 1) ? 3 : 2;     /* delete only when >1 preset */
+    int sel = 0, done = 0, ret = UI_PM_CANCEL;
+    SDL_PumpEvents();                        /* drop the press that opened us */
+    SDL_FlushEvent(SDL_KEYDOWN);
+    SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
+    while (!done) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            int act = 0;
+            if (e.type == SDL_QUIT) { done = 1; }
+            else if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
+                switch (e.key.keysym.sym) {
+                case SDLK_UP: sel = (sel + nit - 1) % nit; break;
+                case SDLK_DOWN: sel = (sel + 1) % nit; break;
+                case SDLK_RETURN: act = 1; break;
+                case SDLK_ESCAPE: done = 1; break;
+                }
+            } else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
+                switch (e.cbutton.button) {
+                case SDL_CONTROLLER_BUTTON_DPAD_UP: sel = (sel + nit - 1) % nit; break;
+                case SDL_CONTROLLER_BUTTON_DPAD_DOWN: sel = (sel + 1) % nit; break;
+                case SDL_CONTROLLER_BUTTON_B: act = 1; break;      /* physical A */
+                case SDL_CONTROLLER_BUTTON_A: done = 1; break;     /* physical B */
+                }
+            }
+            if (act) { ret = sel; done = 1; }       /* sel maps to UI_PM_* */
+        }
+        ui_render(ren, a);
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 160);
+        SDL_RenderFillRect(ren, &(SDL_Rect){0, 0, UI_W, UI_H});
+        int w = 460, rowh = 64, h = 96 + nit * rowh;
+        int x = (UI_W - w) / 2, y = (UI_H - h) / 2;
+        fill_round(ren, x, y, w, h, 24, (SDL_Color){30, 32, 40, 255});
+        text(ren, g_font_l, "Menu", UI_W / 2, y + 28, C_WHITE, 1);
+        int lh = TTF_FontHeight(g_font_l);
+        for (int i = 0; i < nit; i++) {
+            int ry = y + 84 + i * rowh;
+            if (i == sel) fill_round(ren, x + 24, ry, w - 48, rowh - 12, (rowh - 12) / 2, C_WHITE);
+            text(ren, g_font_l, items[i], UI_W / 2, ry + (rowh - 12) / 2 - lh / 2,
+                 i == sel ? C_DARK : C_WHITE, 1);
+        }
+        SDL_RenderPresent(ren);
+        SDL_Delay(16);
+    }
+    return ret;
+}
+
+
+/* ---- on-screen keyboard ---------------------------------------------
+ * The keyboard is a standalone, reusable module (keyboard.c / keyboard.h).
+ * These thin wrappers feed it this app's fonts and accent colour. */
+static OskConfig ui_osk_cfg(void)
+{
+    OskConfig c;
+    c.font_title = g_font_l;
+    c.font_key   = g_font_m;
+    c.font_hint  = g_font_s;
+    c.accent     = g_accent;
+    c.max_chars  = 16;          /* preset-name limit */
+    return c;
+}
+
+int ui_keyboard(SDL_Renderer *ren, const char *title, char *buf, int bufsz)
+{
+    OskConfig c = ui_osk_cfg();
+    return osk_run(ren, &c, title, buf, bufsz);
+}
+
+void ui_keyboard_demo(SDL_Renderer *ren)
+{
+    OskConfig c = ui_osk_cfg();
+    osk_demo(ren, &c);
 }

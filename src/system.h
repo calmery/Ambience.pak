@@ -9,5 +9,6 @@ extern SDL_Color g_accent;
 
 void sys_load_accent(void);
 void sys_battery(int *pct, int *charging);   /* pct < 0 when unavailable */
+int  sys_volume(void);                       /* master volume 0-100, or < 0 if unavailable */
 
 #endif /* AMBIENCE_SYSTEM_H */

@@ -7,7 +7,7 @@ SDL_LIBS   := $(shell pkg-config --libs sdl2 SDL2_ttf)
 CFLAGS  := -O2 -Wall -Wextra $(SDL_CFLAGS)
 LDLIBS  := $(SDL_LIBS) -lm
 
-APP_OBJ := main.o system.o audio.o ui.o config.o actions.o
+APP_OBJ := main.o system.o audio.o ui.o config.o actions.o keyboard.o
 TP_OBJ  := stb_vorbis.o dr_mp3.o
 HDRS    := $(wildcard src/*.h)
 

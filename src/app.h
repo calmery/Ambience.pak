@@ -9,6 +9,7 @@
  *   system.{c,h} - NextUI integration (accent colour, battery)
  *   audio.{c,h}  - decode / load / mix / device (owns g_dev)
  *   ui.{c,h}     - rendering (fonts, shapes, scroll arrows, screens)
+ *   keyboard.{c,h}- standalone on-screen keyboard (reusable across apps)
  *   config.{c,h} - persistence of the mix (future home of presets)
  *   actions.{c,h}- user actions on the App state
  *   main.c       - startup, main loop, input mapping
@@ -52,7 +53,7 @@ typedef struct {
 } PresetEntry;
 
 typedef struct {
-    char name[32];
+    char name[64];   /* up to 16 chars (multibyte safe) */
     PresetEntry e[MAXCH];
     int ne;
 } Preset;

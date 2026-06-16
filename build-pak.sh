@@ -17,7 +17,7 @@ docker run --rm --platform linux/amd64 \
     echo "CROSS_COMPILE=${CROSS_COMPILE}  PREFIX=${PREFIX}"
     CF="-I${PREFIX}/include $(pkg-config --cflags sdl2 2>/dev/null)"
     OBJ=""
-    for m in system audio ui config actions main; do
+    for m in system audio ui config actions keyboard main; do
       ${CROSS_COMPILE}gcc -O2 -fomit-frame-pointer ${CF} -DUSE_SDL2 -c src/$m.c -o /tmp/$m.o
       OBJ="$OBJ /tmp/$m.o"
     done
@@ -25,7 +25,7 @@ docker run --rm --platform linux/amd64 \
     ${CROSS_COMPILE}gcc -O2 -w -fomit-frame-pointer ${CF} -c src/dr_mp3.c -o /tmp/dr_mp3.o
     ${CROSS_COMPILE}gcc $OBJ /tmp/stb_vorbis.o /tmp/dr_mp3.o -o "${OUT}" \
       -L${PREFIX}/lib -L${PREFIX}/lib/${CROSS_TRIPLE} \
-      $(pkg-config --libs sdl2 2>/dev/null || echo -lSDL2) -lSDL2_ttf -lm -lpthread -ldl
+      $(pkg-config --libs sdl2 2>/dev/null || echo -lSDL2) -lSDL2_ttf -lm -lpthread -ldl -lrt
     file "${OUT}"
   '
 echo ">> done: bin/${PLATFORM}/ambience"

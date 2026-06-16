@@ -1,8 +1,8 @@
 /* Presets + persistence (ambience.cfg).
  *
- * The file holds one or more named presets; only `active` is editable today.
- * A future tab strip in ui.c will let the user switch `a->active`, then call
- * config_apply_active() to load that preset's mix onto the channels.
+ * The file holds one or more named presets. The active preset is editable;
+ * volume/mute edits are captured into it. The tab strip in ui.c switches the
+ * active preset.
  *
  * File format:
  *   active <index>
@@ -15,8 +15,15 @@
 
 #include "app.h"
 
-void config_load(App *a);          /* read presets; ensures a "Default" */
-void config_apply_active(App *a);  /* apply active preset onto channels  */
-void config_save(App *a);          /* capture channels into active, write */
+void config_load(App *a);            /* read presets; ensures a "Default" */
+void config_apply_active(App *a);    /* apply active preset onto channels  */
+void config_capture_active(App *a);  /* live channel mix -> active preset  */
+void config_save(App *a);            /* capture + write file               */
+
+/* preset operations (mark the app dirty; persisted on save) */
+void config_switch(App *a, int idx);                 /* capture, activate, apply */
+int  config_new(App *a, const char *name);           /* copy current mix; -1 if full */
+void config_rename(App *a, int idx, const char *name);
+void config_delete(App *a, int idx);                 /* keeps at least one preset */
 
 #endif /* AMBIENCE_CONFIG_H */

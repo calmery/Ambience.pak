@@ -74,7 +74,25 @@ static int run_shot(const char *path)
     }
     g_app.ch[2].muted = 1; g_app.ch[2].saved = 0.6f;
     g_app.sel = 6;
+    const char *pn[] = {"Default", "Storm", "Focus"};
+    g_app.npreset = 3; g_app.active = 1;
+    for (int i = 0; i < 3; i++) strcpy(g_app.presets[i].name, pn[i]);
     ui_render(r, &g_app);
+    SDL_RenderPresent(r);
+    SDL_SaveBMP(s, path);
+    printf("wrote %s\n", path);
+    return 0;
+}
+
+static int run_shotkb(const char *path)
+{
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, UI_W, UI_H, 32,
+                                                    SDL_PIXELFORMAT_RGBA32);
+    SDL_Renderer *r = SDL_CreateSoftwareRenderer(s);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    ui_load_fonts();
+    ui_keyboard_demo(r);
     SDL_RenderPresent(r);
     SDL_SaveBMP(s, path);
     printf("wrote %s\n", path);
@@ -130,6 +148,43 @@ static int map_event(const SDL_Event *e, int *is_release)
     return -1;
 }
 
+/* Preset controls (need the renderer for the menu/keyboard, so handled here
+ * rather than via act_apply). Returns 1 if the event was consumed. */
+static int handle_preset(const SDL_Event *e, SDL_Renderer *ren, App *a)
+{
+    int prev = 0, next = 0, menu = 0;
+    if (e->type == SDL_KEYDOWN && e->key.repeat == 0) {
+        if (e->key.keysym.sym == SDLK_LEFTBRACKET) prev = 1;
+        else if (e->key.keysym.sym == SDLK_RIGHTBRACKET) next = 1;
+        else if (e->key.keysym.sym == SDLK_n) menu = 1;
+    } else if (e->type == SDL_CONTROLLERBUTTONDOWN) {
+        if (e->cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) prev = 1;
+        else if (e->cbutton.button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) next = 1;
+        else if (e->cbutton.button == SDL_CONTROLLER_BUTTON_X) menu = 1;  /* physical Y */
+    }
+    if (!prev && !next && !menu) return 0;
+
+    if (prev) config_switch(a, (a->active + a->npreset - 1) % a->npreset);
+    else if (next) config_switch(a, (a->active + 1) % a->npreset);
+    else {
+        int choice = ui_preset_menu(ren, a);
+        char name[64];
+        if (choice == UI_PM_NEW) {
+            name[0] = 0;
+            if (ui_keyboard(ren, "New preset", name, sizeof name) && name[0])
+                config_new(a, name);
+        } else if (choice == UI_PM_RENAME) {
+            strncpy(name, a->presets[a->active].name, sizeof name - 1);
+            name[sizeof name - 1] = 0;
+            if (ui_keyboard(ren, "Rename preset", name, sizeof name) && name[0])
+                config_rename(a, a->active, name);
+        } else if (choice == UI_PM_DELETE) {
+            config_delete(a, a->active);
+        }
+    }
+    return 1;
+}
+
 /* In the quit-confirm modal: A confirms, B cancels. */
 static int confirm_event(const SDL_Event *e, int *running)
 {
@@ -151,6 +206,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) return run_selftest();
         if (!strcmp(argv[i], "--shot")) return run_shot(i + 1 < argc ? argv[i + 1] : "shot.bmp");
+        if (!strcmp(argv[i], "--shotkb")) return run_shotkb(i + 1 < argc ? argv[i + 1] : "shotkb.bmp");
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -191,6 +247,7 @@ int main(int argc, char **argv)
                 if (confirm_event(&e, &running)) confirm = 0;
                 continue;
             }
+            if (handle_preset(&e, ren, &g_app)) { held = -1; continue; }
             int release = 0;
             int code = map_event(&e, &release);
             if (release) held = -1;
