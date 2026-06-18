@@ -8,6 +8,7 @@ bin/tg5050/ambience
 # Runtime
 ambience.cfg
 log.txt
+version.txt
 
 # User-provided audio (bring your own; keep the folder via .gitkeep)
 res/sounds/*

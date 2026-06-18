@@ -32,4 +32,8 @@ void sys_screen_on(void);
 const char *sys_sounds_dir(void);
 const char *sys_config_path(void);
 
+/* Stamp the running version into <SDCARD>/Ambience/version.txt (cwd off device)
+ * so the installed build can be identified externally. Overwritten each launch. */
+void sys_write_version(const char *ver);
+
 #endif /* AMBIENCE_SYSTEM_H */

@@ -25,6 +25,16 @@
 
 #include <SDL2/SDL.h>
 
+/* Version string. The build injects -DAMBIENCE_VERSION_RAW=<x.y.z> from
+ * pak.json (the single source of truth); falls back to "dev" otherwise. */
+#define AMB_STRINGIFY(x)  #x
+#define AMB_TOSTRING(x)   AMB_STRINGIFY(x)
+#ifdef AMBIENCE_VERSION_RAW
+#define AMBIENCE_VERSION  AMB_TOSTRING(AMBIENCE_VERSION_RAW)
+#else
+#define AMBIENCE_VERSION  "dev"
+#endif
+
 #define SR        44100  /* mixing/output sample rate */
 #define UI_W      1024   /* logical screen size (TrimUI Brick) */
 #define UI_H      768

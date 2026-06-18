@@ -255,6 +255,8 @@ int main(int argc, char **argv)
 
     sys_load_accent();
     sys_power_init();
+    SDL_Log("Ambience v%s", AMBIENCE_VERSION);
+    sys_write_version(AMBIENCE_VERSION);
     SDL_Log("accent = #%02x%02x%02x", g_accent.r, g_accent.g, g_accent.b);
     app_seed(&g_app);
     s_ren = ren;

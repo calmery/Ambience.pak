@@ -16,9 +16,13 @@ docker run --rm --platform linux/amd64 \
     OUT="bin/'"${PLATFORM}"'/ambience"
     echo "CROSS_COMPILE=${CROSS_COMPILE}  PREFIX=${PREFIX}"
     CF="-I${PREFIX}/include $(pkg-config --cflags sdl2 2>/dev/null)"
+    VER=$(sed -n '\''s/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'\'' pak.json | head -1)
+    VERDEF=""
+    [ -n "$VER" ] && VERDEF="-DAMBIENCE_VERSION_RAW=$VER"
+    echo "version=${VER:-dev}"
     OBJ=""
     for m in system audio ui config actions keyboard main; do
-      ${CROSS_COMPILE}gcc -O2 -fomit-frame-pointer ${CF} -DUSE_SDL2 -c src/$m.c -o /tmp/$m.o
+      ${CROSS_COMPILE}gcc -O2 -fomit-frame-pointer ${CF} ${VERDEF} -DUSE_SDL2 -c src/$m.c -o /tmp/$m.o
       OBJ="$OBJ /tmp/$m.o"
     done
     ${CROSS_COMPILE}gcc -O2 -w -fomit-frame-pointer ${CF} -c src/stb_vorbis.c -o /tmp/stb_vorbis.o

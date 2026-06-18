@@ -7,14 +7,14 @@ rain, ocean, fire, anything — each with its own volume, and fade out on a time
 ## Sounds (bring your own)
 On the device, drop audio files into **`/mnt/SDCARD/Ambience/sounds/`**. This
 folder lives outside the pak, so your sounds and presets **survive uninstalling
-or updating the app**. The folder is created on first launch, and the bundled
-sample (`Ocean.mp3`) is copied in so there's something to play right away.
-Each file becomes a channel named after the file:
+or updating the app**. The folder is created on first launch, and — only when it
+has no audio yet — the bundled sounds are copied in so there's something to play
+right away. Each file becomes a channel named after the file:
 
-- `Fire.ogg` → a **Fire** channel, `Ocean.mp3` → **Ocean**, etc.
+- `Fire.ogg` → a **Fire** channel, `Ocean.ogg` → **Ocean**, etc.
 - Supported formats: **OGG, WAV, MP3** (any sample rate / mono or stereo — they
   are resampled to 44.1 kHz stereo on load).
-- Files loop seamlessly; for best results use steady, loop-friendly recordings.
+- Files loop continuously; for best results use steady, loop-friendly recordings.
 - No files yet? The app shows the folder path and waits — add some and relaunch.
 
 (During desktop development the app reads the local `res/sounds/` instead.)
@@ -34,10 +34,13 @@ volume + mute state, the active preset, and free-form names) are written to
 | Adjust volume (hold to repeat) | Left / Right | D-Pad L/R |
 | Mute / unmute channel | M / Enter | A |
 | Play / Pause | P / Space | X |
+| Previous / next preset | [ / ] | L1 / R1 |
+| Preset menu (new / rename / delete) | N | Y (or Menu) |
 | Sleep timer (5-min steps, off..60m) | T | Select |
-| Quit (with confirmation) | Q / Esc | B |
+| Quit (with confirmation) | Q / Esc | B (or Start) |
 
-Overall loudness is the device's hardware volume buttons.
+Overall loudness is the device's hardware volume buttons. On the device, a short
+press of the **power button** toggles the screen off/on.
 
 > TrimUI uses a Nintendo button layout; SDL names buttons by Xbox position, so
 > the code maps physical A→SDL_B, physical X→SDL_Y, etc.
@@ -55,12 +58,17 @@ make selftest    # headless: scan res/sounds and report the channels found
 
 `./build-pak.sh tg5040` cross-compiles with the official NextUI toolchain
 (Docker image `ghcr.io/loveretro/tg5040-toolchain`) and writes
-`bin/tg5040/ambience`. Then the folder is zipped with `launch.sh`, `pak.json`,
-`res/` (font + sounds), and `bin/`.
+`bin/tg5040/ambience`. It only builds the binary — it does not package the pak.
 
-Install: copy the resulting folder to `/Tools/<platform>/Ambience.pak` on the SD
-card. Add or replace audio in `/mnt/SDCARD/Ambience/sounds/` any time — it is
-kept outside the pak, so reinstalling or removing the app won't touch it.
+To assemble the pak, zip a folder named `Ambience.pak` containing `launch.sh`,
+`res/` (font + license + sounds), and `bin/` into `dist/Ambience.pak.zip`.
+`pak.json` stays at the repo root as store metadata and is **not** bundled inside
+the pak — NextUI only requires `launch.sh` to be present.
+
+Install: copy the `Ambience.pak` folder to `Tools/<platform>/` on the SD card
+(e.g. `Tools/tg5040/Ambience.pak`). Add or replace audio in
+`/mnt/SDCARD/Ambience/sounds/` any time — it is kept outside the pak, so
+reinstalling or removing the app won't touch it.
 
 ## Layout (source modules)
 - `src/app.h` — shared `Channel` / `App` types + constants
@@ -71,14 +79,16 @@ kept outside the pak, so reinstalling or removing the app won't touch it.
 - `src/keyboard.{c,h}` — standalone on-screen keyboard (reusable across apps)
 - `src/config.{c,h}` — save/load presets
 - `src/actions.{c,h}` — user actions on the app state
-- `src/main.c` — startup, main loop, input mapping, `--selftest` / `--shot`
+- `src/main.c` — startup, main loop, input mapping, the `--selftest` / `--shot`
+  / `--shotload` / `--shotkb` dev flags
 - `src/stb_vorbis.c`, `src/dr_mp3.c` — bundled OGG / MP3 decoders (static)
 - `res/font.ttf` — Rounded M+ 1c Bold (the NextUI rounded font), bundled
 - `res/sounds/` — bundled sample(s), seeded to the SD card on first run
 - `launch.sh`, `pak.json`, `build-pak.sh` — NextUI pak packaging / build
 
-Dev helpers: `./ambience --selftest` (scan + decode, no audio device) and
-`./ambience --shot out.bmp` (render one UI frame offscreen).
+Dev helpers (offscreen, no device): `--selftest` (scan + decode), `--shot
+out.bmp` (main screen), `--shotload out.bmp` (loading screen), `--shotkb
+out.bmp` (on-screen keyboard).
 
 ## Credits & licenses
 Bundled third-party assets/libraries, all redistributable:
@@ -86,5 +96,8 @@ Bundled third-party assets/libraries, all redistributable:
   Authors, **SIL Open Font License 1.1** (full text in `res/font.LICENSE.txt`).
 - **stb_vorbis** (OGG decoder) — Sean Barrett, public domain / MIT.
 - **dr_mp3** (MP3 decoder) — David Reid, public domain (MIT-0).
+- **Bundled sounds** `res/sounds/*.ogg` — **CC0 1.0** (public domain dedication);
+  free to use, modify, and redistribute. The noise / drone / binaural tracks are
+  generated by `gen_sounds.py`.
 
-Beyond the bundled sample, add your own audio to `/mnt/SDCARD/Ambience/sounds/`.
+Beyond the bundled sounds, add your own audio to `/mnt/SDCARD/Ambience/sounds/`.

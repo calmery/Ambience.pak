@@ -95,6 +95,15 @@ static void resolve_paths(void)
 const char *sys_sounds_dir(void)  { resolve_paths(); return s_sounds; }
 const char *sys_config_path(void) { resolve_paths(); return s_config; }
 
+void sys_write_version(const char *ver)
+{
+    resolve_paths();
+    char path[600];
+    snprintf(path, sizeof path, "%s/version.txt", s_base);
+    FILE *f = fopen(path, "w");
+    if (f) { fprintf(f, "%s\n", ver ? ver : ""); fclose(f); }
+}
+
 void sys_load_accent(void)
 {
     const char *base = getenv("SDCARD_PATH");
