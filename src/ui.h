@@ -24,4 +24,7 @@ int ui_keyboard(SDL_Renderer *ren, const char *title, char *buf, int bufsz);
 
 void ui_keyboard_demo(SDL_Renderer *ren);   /* dev: one keyboard frame (--shotkb) */
 
+/* Loading screen: progress bar + current file name. */
+void ui_render_loading(SDL_Renderer *ren, int cur, int total, const char *name);
+
 #endif /* AMBIENCE_UI_H */

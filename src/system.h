@@ -12,6 +12,19 @@ void sys_battery(int *pct, int *charging);   /* pct < 0 when unavailable */
 int  sys_volume(void);                       /* master volume 0-100, or < 0 if unavailable */
 void sys_backlight(int on);                  /* screen backlight off/on (no-op off device) */
 
+/* Power button -> suspend-to-RAM. NextUI's launcher is blocked while a pak
+ * runs and nothing else handles the power key, so we read it ourselves and
+ * suspend the device. All no-ops off device. */
+void sys_power_init(void);                   /* open the input devices       */
+int  sys_power_pressed(void);                /* 1 if power was pressed        */
+void sys_power_drain(void);                  /* discard pending input         */
+void sys_suspend(void);                      /* 2-stage sleep; returns after wake */
+
+/* Screen-off mode: display + LEDs off, device stays awake (audio continues).
+ * sys_screen_on restores backlight + LEDs to their pre-off state. */
+void sys_screen_off(void);
+void sys_screen_on(void);
+
 /* Persistent data locations (outside the pak, so they survive uninstall).
  * On device: <SDCARD>/Ambience/{sounds,ambience.cfg}; bundled samples are
  * copied into the sounds dir on first run. Off device: local res/sounds and

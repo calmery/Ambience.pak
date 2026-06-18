@@ -34,8 +34,9 @@ static void toggle_pause(App *a)
     SDL_LockAudioDevice(g_dev);
     a->paused = !a->paused;
     a->fade_target = a->paused ? 0.0f : 1.0f;
-    a->fade_cur = a->fade_target;           /* pause/resume is instant */
+    a->fade_cur = a->fade_target;
     SDL_UnlockAudioDevice(g_dev);
+    if (g_dev) SDL_PauseAudioDevice(g_dev, a->paused);
 }
 
 static void cycle_sleep(App *a)
@@ -49,6 +50,10 @@ static void cycle_sleep(App *a)
         mins = ((mins + STEP / 2) / STEP) * STEP;
         mins += STEP;
         a->sleep_left = (mins > MAXM) ? -1 : mins * 60;
+    }
+    if (a->sleep_left < 0 || a->sleep_left > 4.0f) {
+        a->fade_target = a->paused ? 0.0f : 1.0f;
+        a->fade_cur = a->fade_target;
     }
     SDL_UnlockAudioDevice(g_dev);
 }

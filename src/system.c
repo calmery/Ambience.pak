@@ -211,3 +211,231 @@ void sys_backlight(int on)
     int b = settings_snapshot(s) ? s[ST_BRIGHTNESS] : 5;
     set_raw(scale_brightness(b));
 }
+
+/* ---- LED control (button lights on TrimUI Brick) -------------------- *
+ * The Brick has four LED groups (f1, f2, m, lr) controlled via sysfs at
+ * /sys/class/led_anim/.  We mirror NextUI's sleep sequence: save the
+ * current state, switch to a breathe animation, then restore on wake.
+ * Off-device (no sysfs nodes) every write silently fails → no-op. */
+static const char *led_names[] = { "f1", "f2", "m", "lr" };
+#define N_LEDS 4
+
+static void write_sysfs(const char *path, const char *val)
+{
+    int fd = open(path, O_WRONLY);
+    if (fd >= 0) { write(fd, val, strlen(val)); close(fd); }
+}
+
+static int read_sysfs_int(const char *path)
+{
+    return read_int_file(path);
+}
+
+static const char *brightness_path(const char *name)
+{
+    static char buf[128];
+    if (!strcmp(name, "m"))  { snprintf(buf, sizeof buf, "/sys/class/led_anim/max_scale"); }
+    else if (!strcmp(name, "f1") || !strcmp(name, "f2"))
+        snprintf(buf, sizeof buf, "/sys/class/led_anim/max_scale_f1f2");
+    else
+        snprintf(buf, sizeof buf, "/sys/class/led_anim/max_scale_%s", name);
+    return buf;
+}
+
+struct led_state {
+    int brightness;     /* max_scale value (read from sysfs) */
+    int inbrightness;   /* inbrightness from default (100) */
+    int effect;
+    int cycles;
+    int speed;
+    char color[16];     /* hex colour string read from sysfs */
+};
+
+static struct led_state led_saved[N_LEDS];
+
+static void read_sysfs_str(const char *path, char *buf, int sz)
+{
+    buf[0] = 0;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return;
+    ssize_t n = read(fd, buf, sz - 1);
+    close(fd);
+    if (n > 0) { buf[n] = 0; while (n > 0 && buf[n-1] == '\n') buf[--n] = 0; }
+}
+
+static void leds_save(void)
+{
+    for (int i = 0; i < N_LEDS; i++) {
+        char p[128];
+        led_saved[i].brightness = read_sysfs_int(brightness_path(led_names[i]));
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_%s", led_names[i]);
+        led_saved[i].effect = read_sysfs_int(p);
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_cycles_%s", led_names[i]);
+        led_saved[i].cycles = read_sysfs_int(p);
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_duration_%s", led_names[i]);
+        led_saved[i].speed = read_sysfs_int(p);
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_rgb_hex_%s", led_names[i]);
+        read_sysfs_str(p, led_saved[i].color, sizeof led_saved[i].color);
+    }
+}
+
+static int is_f2(int i) { return !strcmp(led_names[i], "f2"); }
+
+/* Mirror CFW's LEDS_updateLeds(indicator_only=true) with LIGHT_PROFILE_SLEEP.
+ * Write order: inbrightness → cycles → speed → color → effect (last = apply). */
+static void leds_set_breathe(void)
+{
+    for (int i = 0; i < N_LEDS; i++) {
+        char p[128], v[16];
+        /* inbrightness (default 100) → max_scale; skip f2 (shares f1's path) */
+        if (!is_f2(i))
+            write_sysfs(brightness_path(led_names[i]), "100");
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_cycles_%s", led_names[i]);
+        write_sysfs(p, "5");
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_duration_%s", led_names[i]);
+        snprintf(v, sizeof v, "%d", led_saved[i].speed > 0 ? led_saved[i].speed : 1000);
+        write_sysfs(p, v);
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_rgb_hex_%s", led_names[i]);
+        write_sysfs(p, led_saved[i].color[0] ? led_saved[i].color : "FFFFFF");
+        snprintf(p, sizeof p, "/sys/class/led_anim/effect_%s", led_names[i]);
+        write_sysfs(p, "2");  /* 2 = breathe; writing effect last applies all */
+    }
+}
+
+static void leds_off(void)
+{
+    for (int i = 0; i < N_LEDS; i++) {
+        if (is_f2(i)) continue;                    /* f2 shares f1's brightness path */
+        write_sysfs(brightness_path(led_names[i]), "0");
+    }
+}
+
+/* Restore: brightness → cycles → speed → color → effect (last = apply). */
+static void leds_restore(void)
+{
+    for (int i = 0; i < N_LEDS; i++) {
+        char p[128], v[16];
+        if (!is_f2(i) && led_saved[i].brightness >= 0) {
+            snprintf(v, sizeof v, "%d", led_saved[i].brightness);
+            write_sysfs(brightness_path(led_names[i]), v);
+        }
+        if (led_saved[i].cycles >= 0) {
+            snprintf(p, sizeof p, "/sys/class/led_anim/effect_cycles_%s", led_names[i]);
+            snprintf(v, sizeof v, "%d", led_saved[i].cycles);
+            write_sysfs(p, v);
+        }
+        if (led_saved[i].speed >= 0) {
+            snprintf(p, sizeof p, "/sys/class/led_anim/effect_duration_%s", led_names[i]);
+            snprintf(v, sizeof v, "%d", led_saved[i].speed);
+            write_sysfs(p, v);
+        }
+        if (led_saved[i].color[0]) {
+            snprintf(p, sizeof p, "/sys/class/led_anim/effect_rgb_hex_%s", led_names[i]);
+            write_sysfs(p, led_saved[i].color);
+        }
+        if (led_saved[i].effect >= 0) {
+            snprintf(p, sizeof p, "/sys/class/led_anim/effect_%s", led_names[i]);
+            snprintf(v, sizeof v, "%d", led_saved[i].effect);
+            write_sysfs(p, v);
+        }
+    }
+}
+
+/* ---- power button -> suspend --------------------------------------- *
+ * Detect the power key via SDL events (SDL_KEYUP scancode 102 or
+ * SDL_JOYBUTTONUP button 102), matching CFW's PLAT_shouldWake / PAD_poll.
+ * Raw evdev reads didn't work on the device — SDL owns the input layer. */
+#define CODE_POWER  102
+#define JOY_POWER   102
+
+void sys_power_init(void) { /* nothing to do — SDL handles input */ }
+
+static int poll_power(int drain_only)
+{
+    SDL_Event ev;
+    int hit = 0;
+    while (SDL_PollEvent(&ev)) {
+        if (drain_only) continue;
+        if (ev.type == SDL_KEYUP && ev.key.keysym.scancode == CODE_POWER)
+            hit = 1;
+        else if (ev.type == SDL_JOYBUTTONUP && ev.jbutton.button == JOY_POWER)
+            hit = 1;
+    }
+    return hit;
+}
+
+int  sys_power_pressed(void) { return poll_power(0); }
+void sys_power_drain(void)   { poll_power(1); }
+
+/* suspend-to-RAM (deep sleep); blocks until the device wakes */
+static void deep_sleep(void)
+{
+    leds_off();
+    for (int i = 0; i < 5; i++) {
+        int fd = open("/sys/power/state", O_WRONLY);
+        if (fd < 0) { SDL_Delay(200); continue; }
+        ssize_t r = write(fd, "mem", 3);           /* blocks until resume */
+        close(fd);
+        if (r >= 0) break;
+        SDL_Delay(2000);                           /* can be EBUSY just after resume */
+    }
+}
+
+/* check for power-button release (matching CFW's PLAT_shouldWake) */
+static int wake_pressed(void)
+{
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_KEYUP && ev.key.keysym.scancode == CODE_POWER)
+            return 1;
+        if (ev.type == SDL_JOYBUTTONUP && ev.jbutton.button == JOY_POWER)
+            return 1;
+    }
+    return 0;
+}
+
+#define DEEP_SLEEP_DELAY 30000   /* ms before suspend-to-RAM (CFW default) */
+
+void sys_suspend(void)
+{
+    leds_save();
+    leds_set_breathe();                            /* breathe animation */
+    sys_backlight(0);
+
+    Uint32 start = SDL_GetTicks();
+    int woken = 0;
+    while (!woken) {
+        SDL_Delay(200);
+        if (wake_pressed()) { woken = 1; break; }
+        if (SDL_GetTicks() - start >= DEEP_SLEEP_DELAY) {
+            deep_sleep();                          /* suspend-to-RAM */
+            woken = 1;                             /* resumed by power button */
+        }
+    }
+
+    /* Wait for the power button to be fully released before continuing.
+     * After resume, the user may still be holding the button; without this
+     * drain loop the release event would arrive in the main loop and
+     * immediately re-trigger sleep (matching CFW's PAD_reset behaviour). */
+    for (int w = 0; w < 10; w++) {                 /* up to ~200ms */
+        sys_power_drain();
+        SDL_Delay(20);
+    }
+    sys_power_drain();
+
+    sys_backlight(1);
+    leds_restore();
+}
+
+void sys_screen_off(void)
+{
+    leds_save();
+    leds_set_breathe();
+    sys_backlight(0);
+}
+
+void sys_screen_on(void)
+{
+    sys_backlight(1);
+    leds_restore();
+}

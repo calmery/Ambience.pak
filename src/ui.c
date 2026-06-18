@@ -485,6 +485,7 @@ int ui_preset_menu(SDL_Renderer *ren, App *a)
     SDL_PumpEvents();                        /* drop the press that opened us */
     SDL_FlushEvent(SDL_KEYDOWN);
     SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
+    SDL_FlushEvent(SDL_JOYBUTTONDOWN);
     while (!done) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -552,4 +553,28 @@ void ui_keyboard_demo(SDL_Renderer *ren)
 {
     OskConfig c = ui_osk_cfg();
     osk_demo(ren, &c);
+}
+
+void ui_render_loading(SDL_Renderer *ren, int cur, int total, const char *name)
+{
+    set_color(ren, C_BG);
+    SDL_RenderClear(ren);
+
+    const int barW = 480, barH = 16, rad = barH / 2;
+    int bx = (UI_W - barW) / 2;
+    int by = UI_H / 2;
+
+    fill_round(ren, bx, by, barW, barH, rad, C_TRACK);
+    if (total > 0 && cur > 0) {
+        int fw = barW * cur / total;
+        if (fw < barH) fw = barH;
+        fill_round(ren, bx, by, fw, barH, rad, g_accent);
+    }
+
+    char msg[128];
+    snprintf(msg, sizeof msg, "Loading %s ...", name ? name : "");
+    int mh = g_font_m ? TTF_FontHeight(g_font_m) : 20;
+    text(ren, g_font_m, msg, UI_W / 2, by - mh - 12, C_GRAY, 1);
+
+    SDL_RenderPresent(ren);
 }

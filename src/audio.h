@@ -11,7 +11,12 @@ extern SDL_AudioDeviceID g_dev;
 
 int  audio_open(App *a);                      /* 0 ok, -1 on failure */
 void audio_close(void);
-void audio_load_sounds(App *a, const char *dir);
+
+/* Progress callback: called before decoding each file.
+ * (current_index, total_count, filename) — current is 0-based. */
+typedef void (*audio_progress_fn)(int cur, int total, const char *name);
+
+void audio_load_sounds(App *a, const char *dir, audio_progress_fn progress);
 void audio_free_sounds(App *a);
 
 #endif /* AMBIENCE_AUDIO_H */

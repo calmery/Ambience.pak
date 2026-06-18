@@ -1,8 +1,8 @@
 {
   "name": "Ambience",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "tool",
-  "description": "Ambient-sound mixer. Drop your own .ogg / .wav / .mp3 files into res/sounds and each becomes a looping channel with its own volume and mute. Sleep timer with fade-out; mix is saved and restored.",
+  "description": "Ambient-sound mixer. Drop your own .ogg / .wav / .mp3 files into /mnt/SDCARD/Ambience/sounds and each becomes a seamlessly looping channel with its own volume and mute. Named presets with an on-screen keyboard, sleep timer with fade-out; everything is saved outside the pak so it survives uninstalling.",
   "author": "calmery",
   "repo_url": "https://github.com/calmery/nextui-ambience",
   "release_filename": "Ambience.pak.zip",

@@ -55,8 +55,21 @@ static int decode_to_pcm(const char *path, short **out, int *frames)
         if (avail > 0) {
             short *dst = malloc(avail);
             int got = dst ? SDL_AudioStreamGet(st, dst, avail) : -1;
-            if (got > 0) { *out = dst; *frames = got / 4; ok = 1; }
-            else free(dst);
+            if (got > 0) {
+                int fr = got / 4;                 /* stereo S16: 4 bytes/frame */
+                /* trim leading/trailing near-silence so the loop is seamless
+                 * (MP3s in particular carry encoder padding at the ends) */
+                const int TH = 110;               /* ~ -49 dBFS */
+                int s = 0, e = fr;
+                while (s < e && abs(dst[2 * s]) <= TH && abs(dst[2 * s + 1]) <= TH) s++;
+                while (e > s && abs(dst[2 * (e - 1)]) <= TH && abs(dst[2 * (e - 1) + 1]) <= TH) e--;
+                if (e - s < 1) { s = 0; e = fr; } /* entirely quiet: keep as-is */
+                int nf = e - s;
+                if (s > 0) memmove(dst, dst + 2 * s, (size_t)nf * 4);
+                *out = dst; *frames = nf; ok = 1;
+            } else {
+                free(dst);
+            }
         }
     }
     if (st) SDL_FreeAudioStream(st);
@@ -71,7 +84,7 @@ static int cmp_str(const void *a, const void *b)
     return strcasecmp(*(const char *const *)a, *(const char *const *)b);
 }
 
-void audio_load_sounds(App *a, const char *dir)
+void audio_load_sounds(App *a, const char *dir, audio_progress_fn progress)
 {
     a->nch = 0;
     DIR *d = opendir(dir);
@@ -92,6 +105,13 @@ void audio_load_sounds(App *a, const char *dir)
 
     for (int i = 0; i < n; i++) {
         if (a->nch < MAXCH) {
+            char label[48];
+            strncpy(label, names[i], sizeof label - 1);
+            label[sizeof label - 1] = 0;
+            char *dot = strrchr(label, '.');
+            if (dot) *dot = 0;
+            if (progress) progress(i, n, label);
+
             char path[600];
             snprintf(path, sizeof path, "%s/%s", dir, names[i]);
             short *pcm; int fr;
@@ -99,8 +119,8 @@ void audio_load_sounds(App *a, const char *dir)
                 Channel *c = &a->ch[a->nch++];
                 memset(c, 0, sizeof *c);
                 strncpy(c->name, names[i], sizeof c->name - 1);
-                char *dot = strrchr(c->name, '.');
-                if (dot) *dot = 0;             /* drop extension */
+                char *ndot = strrchr(c->name, '.');
+                if (ndot) *ndot = 0;
                 ui_make_disp(c->name, c->disp, sizeof c->disp);
                 c->data = pcm; c->frames = fr;
                 c->target = 0.5f; c->saved = 0.5f;
@@ -128,7 +148,7 @@ static void audio_cb(void *userdata, Uint8 *stream, int len)
     int16_t *out = (int16_t *)stream;
     int frames = len / (int)(2 * sizeof(int16_t));
     const float vstep = 1.0f / (SR * 0.20f);   /* 200 ms volume slew */
-    const float fstep = 1.0f / (SR * 0.50f);   /* 500 ms sleep fade  */
+    const float fstep = 1.0f / (SR * 4.0f);    /* 4 s sleep fade     */
 
     for (int i = 0; i < frames; i++) {
         if (a->fade_cur < a->fade_target) {

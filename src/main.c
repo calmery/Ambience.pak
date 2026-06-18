@@ -32,6 +32,7 @@ static void app_seed(App *a)
 {
     memset(a, 0, sizeof *a);
     a->master = 1.0f;
+    a->fade_cur = 1.0f;
     a->fade_target = 1.0f;
     a->sleep_left = -1;
 }
@@ -41,7 +42,7 @@ static void app_seed(App *a)
 static int run_selftest(void)
 {
     app_seed(&g_app);
-    audio_load_sounds(&g_app, sys_sounds_dir());
+    audio_load_sounds(&g_app, sys_sounds_dir(), NULL);
     printf("selftest: channels=%d\n", g_app.nch);
     for (int c = 0; c < g_app.nch; c++)
         printf("  %-16s %d frames (%.1fs)\n", g_app.ch[c].name,
@@ -77,6 +78,22 @@ static int run_shot(const char *path)
     g_app.npreset = 3; g_app.active = 1;
     for (int i = 0; i < 3; i++) strcpy(g_app.presets[i].name, pn[i]);
     ui_render(r, &g_app);
+    SDL_RenderPresent(r);
+    SDL_SaveBMP(s, path);
+    printf("wrote %s\n", path);
+    return 0;
+}
+
+static int run_shotload(const char *path)
+{
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, UI_W, UI_H, 32,
+                                                    SDL_PIXELFORMAT_RGBA32);
+    SDL_Renderer *r = SDL_CreateSoftwareRenderer(s);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    ui_load_fonts();
+    sys_load_accent();
+    ui_render_loading(r, 3, 9, "Brown Noise");
     SDL_RenderPresent(r);
     SDL_SaveBMP(s, path);
     printf("wrote %s\n", path);
@@ -160,6 +177,8 @@ static int handle_preset(const SDL_Event *e, SDL_Renderer *ren, App *a)
         if (e->cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) prev = 1;
         else if (e->cbutton.button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) next = 1;
         else if (e->cbutton.button == SDL_CONTROLLER_BUTTON_X) menu = 1;  /* physical Y */
+    } else if (e->type == SDL_JOYBUTTONDOWN) {
+        if (e->jbutton.button == 8) menu = 1;   /* TrimUI MENU button (JOY_MENU) */
     }
     if (!prev && !next && !menu) return 0;
 
@@ -198,6 +217,15 @@ static int confirm_event(const SDL_Event *e, int *running)
     return 0;
 }
 
+/* ---- loading screen ------------------------------------------------ */
+
+static SDL_Renderer *s_ren;
+
+static void loading_progress(int cur, int total, const char *name)
+{
+    if (s_ren) ui_render_loading(s_ren, cur, total, name);
+}
+
 /* ---- main ---------------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -205,6 +233,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) return run_selftest();
         if (!strcmp(argv[i], "--shot")) return run_shot(i + 1 < argc ? argv[i + 1] : "shot.bmp");
+        if (!strcmp(argv[i], "--shotload")) return run_shotload(i + 1 < argc ? argv[i + 1] : "shotload.bmp");
         if (!strcmp(argv[i], "--shotkb")) return run_shotkb(i + 1 < argc ? argv[i + 1] : "shotkb.bmp");
     }
 
@@ -225,9 +254,12 @@ int main(int argc, char **argv)
         if (SDL_IsGameController(i)) SDL_GameControllerOpen(i);
 
     sys_load_accent();
+    sys_power_init();
     SDL_Log("accent = #%02x%02x%02x", g_accent.r, g_accent.g, g_accent.b);
     app_seed(&g_app);
-    audio_load_sounds(&g_app, sys_sounds_dir());
+    s_ren = ren;
+    audio_load_sounds(&g_app, sys_sounds_dir(), loading_progress);
+    s_ren = NULL;
     config_load(&g_app);
     config_apply_active(&g_app);
     if (audio_open(&g_app) != 0)
@@ -243,9 +275,26 @@ int main(int argc, char **argv)
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { running = 0; continue; }
-            if (screen_off) {                   /* any press just wakes the screen */
-                if (e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN) {
-                    sys_backlight(1); screen_off = 0; held = -1;
+
+            /* power button release (SDL_KEYUP scancode 102 or joystick 102) */
+            if ((e.type == SDL_KEYUP && e.key.keysym.scancode == 102) ||
+                (e.type == SDL_JOYBUTTONUP && e.jbutton.button == 102)) {
+                if (screen_off) { sys_screen_on(); screen_off = 0; }
+                else             { sys_screen_off(); screen_off = 1; }
+                for (int w = 0; w < 10; w++) { sys_power_drain(); SDL_Delay(20); }
+                sys_power_drain();
+                held = -1;
+                last = SDL_GetTicks();
+                break;
+            }
+
+            if (screen_off) {
+                int release = 0;
+                int code = map_event(&e, &release);
+                if (release) held = -1;
+                if (code == ACT_DEC || code == ACT_INC) {
+                    act_apply(&g_app, code, &confirm);
+                    if (code <= ACT_INC) { held = code; held_since = held_last = SDL_GetTicks(); }
                 }
                 continue;
             }
@@ -273,19 +322,29 @@ int main(int argc, char **argv)
 
         float dt = (now - last) / 1000.0f;
         last = now;
-        if (g_app.sleep_left >= 0) {
+        if (g_app.sleep_left >= 0 && !g_app.paused) {
             SDL_LockAudioDevice(g_dev);
             g_app.sleep_left -= dt;
-            if (g_app.sleep_left <= 20.0f) g_app.fade_target = 0.0f;
-            int expired = (g_app.sleep_left <= 0.0f);
+            if (g_app.sleep_left < 0) g_app.sleep_left = 0;
+            if (g_app.sleep_left <= 4.0f) g_app.fade_target = 0.0f;
+            int expired = (g_app.sleep_left == 0 && g_app.fade_cur <= 0.001f);
             if (expired) { g_app.sleep_left = -1; g_app.paused = 1; }
             SDL_UnlockAudioDevice(g_dev);
-            if (expired) { sys_backlight(0); screen_off = 1; }   /* lights out */
+            if (expired) {
+                if (screen_off) { sys_screen_on(); screen_off = 0; }
+                if (g_dev) SDL_PauseAudioDevice(g_dev, 1);
+                sys_suspend();
+                SDL_PumpEvents();
+                SDL_FlushEvent(SDL_KEYDOWN); SDL_FlushEvent(SDL_KEYUP);
+                SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN); SDL_FlushEvent(SDL_CONTROLLERBUTTONUP);
+                held = -1;
+                last = SDL_GetTicks();
+            }
         }
 
         if (g_app.dirty && now - g_app.last_change > 800) config_save(&g_app);
 
-        if (screen_off) {                       /* asleep: idle, nothing to draw */
+        if (screen_off) {
             SDL_Delay(50);
             continue;
         }
@@ -294,7 +353,7 @@ int main(int argc, char **argv)
         SDL_RenderPresent(ren);
     }
 
-    if (screen_off) sys_backlight(1);           /* don't leave it dark on exit */
+    if (screen_off) sys_screen_on();             /* don't leave it dark on exit */
     if (g_app.dirty) config_save(&g_app);
     audio_close();
     audio_free_sounds(&g_app);
